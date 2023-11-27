@@ -11,8 +11,6 @@ from schema.data_schema import ForecastingSchema
 from sklearn.exceptions import NotFittedError
 
 warnings.filterwarnings("ignore")
-os.environ["MPLCONFIGDIR"] = os.getcwd() + "/matplotlib_configs/"
-
 
 PREDICTOR_FILE_NAME = "predictor.joblib"
 
