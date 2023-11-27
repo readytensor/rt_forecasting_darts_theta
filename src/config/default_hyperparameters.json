@@ -1,5 +1,5 @@
 {
   "theta": 2,
-  "season_mode": "multiplicative",
+  "season_mode": "additive",
   "seasonality_period": null
 }
