@@ -16,6 +16,26 @@ The following are the requirements for using your data with this model:
 
 ---
 
+### Covariates Support:
+
+Past :white_check_mark:
+
+Future :white_check_mark:
+
+Static :white_check_mark:
+
+---
+
+### Covariates Support:
+
+Past :x:
+
+Future :x:
+
+Static :x:
+
+---
+
 Here are the highlights of this implementation: <br/>
 
 - A **Theta Forecaster** algorithm built using **Darts**
