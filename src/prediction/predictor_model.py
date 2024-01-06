@@ -107,12 +107,7 @@ class Forecaster:
             seasonality_period=self.seasonality_period,
         )
 
-        series = TimeSeries.from_dataframe(
-            history,
-            data_schema.time_col,
-            data_schema.target,
-            fill_missing_dates=True,
-        )
+        series = TimeSeries.from_dataframe(history, value_cols=data_schema.target)
         model.fit(series)
 
         return model
