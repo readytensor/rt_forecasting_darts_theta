@@ -13,7 +13,7 @@ from utils import (
     read_json_as_dict,
     set_seeds,
     map_hyperparameters,
-    Timer,
+    TimeAndMemoryTracker,
 )
 
 logger = get_logger(task_name="train")
