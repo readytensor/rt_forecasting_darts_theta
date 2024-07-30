@@ -9,6 +9,8 @@ from darts.utils.utils import SeasonalityMode
 from darts import TimeSeries
 from schema.data_schema import ForecastingSchema
 from sklearn.exceptions import NotFittedError
+from joblib import Parallel, delayed
+from multiprocessing import cpu_count
 
 warnings.filterwarnings("ignore")
 
@@ -33,9 +35,15 @@ class Forecaster:
         """Construct a new Theta Forecaster
 
         Args:
-            theta (int): Value of the theta parameter. Defaults to 2. Cannot be set to 0. If theta = 1, then the theta method restricts to a simple exponential smoothing (SES)
-            seasonality_period (Optional[int]): User-defined seasonality period. If not set, will be tentatively inferred from the training series upon calling fit().
-            season_mode (SeasonalityMode): Type of seasonality. Either SeasonalityMode.MULTIPLICATIVE, SeasonalityMode.ADDITIVE or SeasonalityMode.NONE. Defaults to SeasonalityMode.MULTIPLICATIVE.
+            theta (int): Value of the theta parameter. Defaults to 2. Cannot be set to 0.
+                    If theta = 1, then the theta method restricts to a simple exponential
+                    smoothing (SES)
+            seasonality_period (Optional[int]): User-defined seasonality period.
+                    If not set, will be tentatively inferred from the training series upon
+                    calling fit().
+            season_mode (SeasonalityMode): Type of seasonality.
+                    Either SeasonalityMode.MULTIPLICATIVE, SeasonalityMode.ADDITIVE or
+                    SeasonalityMode.NONE. Defaults to SeasonalityMode.MULTIPLICATIVE.
         """
         self.theta = theta
         self.seasonality_period = seasonality_period
@@ -45,62 +53,45 @@ class Forecaster:
         self.data_schema = None
 
     def map_frequency(self, frequency: str) -> str:
-        """
-        Maps the frequency in the data schema to the frequency expected by Forecaster.
-
-        Args:
-            frequency (str): The frequency from the schema.
-
-        Returns (str): The mapped frequency.
-        """
-        frequency = frequency.lower()
-        frequency = frequency.split("frequency.")[1]
-        if frequency == "yearly":
-            return "Y"
-        if frequency == "quarterly":
-            return "Q"
-        if frequency == "monthly":
-            return "M"
-        if frequency == "weekly":
-            return "W"
-        if frequency == "daily":
-            return "D"
-        if frequency == "hourly":
-            return "H"
-        if frequency == "minutely":
-            return "min"
-        if frequency in ["secondly", "other"]:
-            return "S"
+        frequency = frequency.lower().split("frequency.")[1]
+        mapping = {
+            "yearly": "Y",
+            "quarterly": "Q",
+            "monthly": "M",
+            "weekly": "W",
+            "daily": "D",
+            "hourly": "H",
+            "minutely": "min",
+            "secondly": "S",
+        }
+        return mapping.get(frequency, "S")
 
     def fit(self, history: pd.DataFrame, data_schema: ForecastingSchema) -> None:
-        """Fit the Forecaster to the training data.
-        A separate Theta model is fit to each series that is contained
-        in the data.
-
-        Args:
-            history (pandas.DataFrame): The features of the training data.
-            data_schema (ForecastingSchema): The schema of the training data.
-        """
         np.random.seed(0)
-        groups_by_ids = history.groupby(data_schema.id_col)
+        history.set_index(
+            data_schema.id_col, inplace=True
+        )  # Set index for faster filtering
+        groups_by_ids = history.groupby(level=0)  # Group by the index
+
         all_ids = list(groups_by_ids.groups.keys())
         all_series = [
-            groups_by_ids.get_group(id_).drop(columns=data_schema.id_col)
-            for id_ in all_ids
+            groups_by_ids.get_group(id_).reset_index(drop=True) for id_ in all_ids
         ]
 
-        self.models = {}
+        def fit_model(id_, series):
+            return id_, self._fit_on_series(history=series, data_schema=data_schema)
 
-        for id, series in zip(all_ids, all_series):
-            model = self._fit_on_series(history=series, data_schema=data_schema)
-            self.models[id] = model
+        n_jobs = max(1, cpu_count() - 2)
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(fit_model)(id_, series) for id_, series in zip(all_ids, all_series)
+        )
+        self.models = dict(results)
 
         self.all_ids = all_ids
         self._is_trained = True
         self.data_schema = data_schema
 
     def _fit_on_series(self, history: pd.DataFrame, data_schema: ForecastingSchema):
-        """Fit Theta model to given individual series of data"""
         model = Theta(
             theta=self.theta,
             season_mode=self.season_mode,
@@ -131,8 +122,9 @@ class Forecaster:
         ]
         # forecast one series at a time
         all_forecasts = []
+        forecast_length = len(all_series[0])
         for id_, series_df in zip(self.all_ids, all_series):
-            forecast = self._predict_on_series(key_and_future_df=(id_, series_df))
+            forecast = self._predict_on_series(key_and_future_df=(id_, series_df, forecast_length))
             forecast.insert(0, self.data_schema.id_col, id_)
             all_forecasts.append(forecast)
 
@@ -146,18 +138,16 @@ class Forecaster:
 
     def _predict_on_series(self, key_and_future_df):
         """Make forecast on given individual series of data"""
-        key, future_df = key_and_future_df
-
+        key, future_df, forecast_length = key_and_future_df
+        model = self.models[key]
         if self.models.get(key) is not None:
-            forecast = self.models[key].predict(len(future_df))
+            forecast = model.predict(forecast_length)
             forecast_df = forecast.pd_dataframe()
             forecast = forecast_df[self.data_schema.target]
             future_df[self.data_schema.target] = forecast.values
-
         else:
             # no model found - key wasnt found in history, so cant forecast for it.
             future_df = None
-
         return future_df
 
     def save(self, model_dir_path: str) -> None:
