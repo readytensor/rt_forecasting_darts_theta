@@ -92,13 +92,16 @@ class Forecaster:
         self.data_schema = data_schema
 
     def _fit_on_series(self, history: pd.DataFrame, data_schema: ForecastingSchema):
+        min_series_value = history[data_schema.target].values.min()
+        series = TimeSeries.from_dataframe(history, value_cols=data_schema.target)
+        if min_series_value <= 0:
+            self.season_mode = SeasonalityMode.ADDITIVE
         model = Theta(
             theta=self.theta,
             season_mode=self.season_mode,
             seasonality_period=self.seasonality_period,
         )
 
-        series = TimeSeries.from_dataframe(history, value_cols=data_schema.target)
         model.fit(series)
 
         return model
@@ -124,7 +127,9 @@ class Forecaster:
         all_forecasts = []
         forecast_length = len(all_series[0])
         for id_, series_df in zip(self.all_ids, all_series):
-            forecast = self._predict_on_series(key_and_future_df=(id_, series_df, forecast_length))
+            forecast = self._predict_on_series(
+                key_and_future_df=(id_, series_df, forecast_length)
+            )
             forecast.insert(0, self.data_schema.id_col, id_)
             all_forecasts.append(forecast)
 
